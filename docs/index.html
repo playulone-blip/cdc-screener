@@ -1,0 +1,112 @@
+<!doctype html><html lang="th"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>CDC V3 + ATR Screener</title>
+<script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+<style>
+:root{--bg:#fff;--fg:#1a1a1a;--mut:#6b7280;--card:#f6f7f9;--bd:#e3e5e9;--hl:rgba(46,204,113,.14)}
+@media(prefers-color-scheme:dark){:root{--bg:#14161a;--fg:#e8e8ea;--mut:#9aa0a6;--card:#1d2026;--bd:#2c3038;--hl:rgba(46,204,113,.16)}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:14px system-ui,"Noto Sans Thai",sans-serif}
+header{display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding:12px 16px;border-bottom:1px solid var(--bd)}
+h1{font-size:16px;margin:0 8px 0 0}
+input,select,button{background:var(--card);color:var(--fg);border:1px solid var(--bd);border-radius:6px;padding:6px 10px;font:inherit}
+button{cursor:pointer}button.pri{background:#2ecc71;color:#06260f;border-color:#2ecc71;font-weight:600}
+.row{display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding:10px 16px}
+main{display:grid;grid-template-columns:minmax(560px,1.1fr) minmax(360px,1fr);gap:12px;padding:0 16px 16px}
+@media(max-width:1100px){main{grid-template-columns:1fr}}
+.panel{background:var(--card);border:1px solid var(--bd);border-radius:10px;overflow:hidden}
+.tw{max-height:78vh;overflow:auto}
+table{width:100%;border-collapse:collapse}
+th,td{padding:7px 9px;text-align:right;border-bottom:1px solid var(--bd);white-space:nowrap}
+th:first-child,td:first-child,th:nth-child(3),td:nth-child(3){text-align:left}
+th{position:sticky;top:0;background:var(--card);color:var(--mut);font-weight:500;cursor:pointer;user-select:none}
+tr.r{cursor:pointer}tr.r:hover,tr.sel{background:rgba(128,128,128,.16)}tr.fresh{background:var(--hl)}
+.z{display:inline-block;padding:1px 8px;border-radius:10px;font-size:12px;color:#111}
+#chart{height:520px}.mut{color:var(--mut)}.ch{padding:10px 14px;border-bottom:1px solid var(--bd)}
+.up{color:#2ecc71}.dn{color:#e74c3c}
+</style></head><body>
+<header><h1>CDC V3 + ATR Screener</h1><button class="pri" id="scan">โหลดใหม่</button><span id="st" class="mut"></span><span id="cnt" class="mut"></span></header>
+<div class="row mut" id="info"></div>
+<div class="row">
+<select id="fl"><option value="all">ทั้งหมด</option><option value="b0">BUY วันนี้</option><option value="b3">BUY ภายใน 3 แท่ง</option><option value="hold">กำลังถืออยู่</option></select>
+<input id="q" placeholder="ค้นหาในผล" style="width:130px">
+<label class="mut">เทรดขั้นต่ำ <input id="mt" type="number" value="0" style="width:64px"></label>
+</div>
+<main>
+<div class="panel tw"><table><thead><tr id="th"></tr></thead><tbody id="tb"></tbody></table></div>
+<div class="panel"><div class="ch" id="ct">เลือกหุ้นจากตาราง</div><div id="chart"></div>
+<div class="ch mut" style="border-top:1px solid var(--bd);border-bottom:0">สีแท่ง = โซน CDC V3 · แดง/น้ำเงิน = EMA Fast/Slow · ลูกศร = จุดเข้า · วงกลม = จุดออก (SL/TRAIL/TP/SIGNAL) · เส้นประส้ม = ATR stop ของไม้ที่ถืออยู่ · แถวพื้นเขียว = BUY ล่าสุด (เข้าที่ราคาเปิดวันถัดไป) · ข้อมูลคำนวณจากแท่งที่ปิดแล้ว อัปเดตอัตโนมัติหลังตลาดปิด · ผลย้อนหลังไม่ได้รับประกันอนาคต ไม่ใช่คำแนะนำการลงทุน</div></div>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+const ZC={Green:'#2ecc71',Blue:'#3498db',LBlue:'#00bcd4',Red:'#e74c3c',Orange:'#f39c12',Yellow:'#f1c40f',Neutral:'#9aa0a6'};
+const fname=s=>s.replace(/[^A-Za-z0-9._-]/g,'_')+'.json';
+async function api(u){const r=await fetch(u+'?t='+Date.now(),{cache:'no-store'});if(!r.ok)throw new Error(r.status===404?'ไม่พบไฟล์ข้อมูล':r.status);return r.json()}
+
+const f=(x,d=1)=>x==null?'-':Number(x).toFixed(d);
+const fp=x=>x==null?'-':Number(x).toFixed(Math.abs(x)>=1?2:4);
+function sigCell(r){if(!r.sig)return'-';const c=r.sig==='BUY'?'up':'dn';
+ return `<span class="${c}">${r.sig} ${r.ago===0?'ล่าสุด':r.ago+' แท่งก่อน'}</span>`}
+function posCell(r){if(!r.pos)return'-';const c=r.pos.pnl_pct>=0?'up':'dn';
+ return `<span class="${c}">${r.pos.side==='LONG'?'L':'S'} ${r.pos.pnl_pct>=0?'+':''}${f(r.pos.pnl_pct)}%</span>`}
+function slCell(r){if(r.pos&&r.pos.stop!=null)return fp(r.pos.stop)+(r.pos.trailing?' ⇡':'');
+ return r.plan?`${fp(r.plan.stop)} <span class="mut">(-${f(r.plan.stop_pct)}%)</span>`:'-'}
+const COLS=[
+ ['หุ้น',r=>r.symbol,r=>`<b>${r.symbol.replace('.BK','')}</b>`],
+ ['ราคา',r=>r.close,r=>fp(r.close)],
+ ['โซน',r=>r.zone,r=>`<span class="z" style="background:${ZC[r.zone]||ZC.Neutral}">${r.zone}</span>`],
+ ['สัญญาณ',r=>r.sig?r.ago:999,sigCell],
+ ['ถืออยู่',r=>r.pos?r.pos.pnl_pct:-999,posCell],
+ ['SL',r=>r.plan?r.plan.stop_pct:999,slCell],
+ ['จำนวน (ตาม risk)',r=>r.plan?r.plan.shares:0,r=>r.plan?r.plan.shares.toLocaleString():'-'],
+ ['CAGR%',r=>r.cagr,r=>f(r.cagr)],['MaxDD%',r=>r.maxdd,r=>f(r.maxdd)],['Win%',r=>r.win,r=>f(r.win,0)],
+ ['PF',r=>r.pf==null?99:r.pf,r=>r.pf==null?'∞':f(r.pf,2)],['เทรด',r=>r.trades,r=>r.trades],
+ ['B&H CAGR%',r=>r.bh,r=>f(r.bh)],['แท่งล่าสุด',r=>r.date,r=>r.date]];
+let rows=[],sel=null,chart=null,sk=null,sd=-1,latest='';
+const fresh=r=>r.sig==='BUY'&&r.ago===0;
+function view(){
+ const q=$('q').value.toUpperCase(),fl=$('fl').value,mt=+$('mt').value||0;
+ const L=rows.filter(r=>r.symbol.includes(q)&&r.trades>=mt&&(fl==='all'||(fl==='b0'&&fresh(r))||(fl==='b3'&&r.sig==='BUY'&&r.ago<=3)||(fl==='hold'&&r.pos)));
+ if(sk===null)L.sort((a,b)=>(fresh(b)-fresh(a))||((b.cagr??-1e9)-(a.cagr??-1e9)));
+ else L.sort((a,b)=>{const x=COLS[sk][1](a),y=COLS[sk][1](b);return(x<y?-1:x>y?1:0)*sd});
+ return L}
+function render(){
+ const L=view();
+ $('th').innerHTML=COLS.map((c,i)=>`<th data-i="${i}">${c[0]}${sk===i?(sd>0?' ▲':' ▼'):''}</th>`).join('');
+ $('tb').innerHTML=L.map(r=>`<tr class="r ${r.symbol===sel?'sel':''} ${fresh(r)?'fresh':''}" data-s="${r.symbol}">${COLS.map(c=>`<td>${c[2](r)}</td>`).join('')}</tr>`).join('')
+  ||`<tr><td colspan="${COLS.length}" class="mut">ไม่พบรายการ</td></tr>`;
+ $('cnt').textContent=' · แสดง '+L.length+'/'+rows.length}
+function info(p){if(!p)return'';
+ return `โหมด ${p.mode} · EMA ${p.fast}/${p.slow} · smoothing ${p.smooth} · ATR ${p.atr_len} × ${p.atr_mult||'ปิด'} · TP ${p.rr?p.rr+'R':'ปิด'} · trailing ${p.trail?'เปิด':'ปิด'} · risk ${p.risk}%/ไม้ · เงินทุน ${Number(p.equity).toLocaleString()} · ย้อนหลัง ${p.years} ปี · ค่าคอม ${p.fee}% · slippage ${p.slip}%`}
+async function scan(){
+ $('st').textContent='กำลังโหลด...';
+ try{const j=await api('data/screen.json');rows=j.rows;latest=j.updated;
+  $('st').textContent='อัปเดตข้อมูล '+j.updated+' (เวลาไทย)'+(j.failed.length?' · ดึงข้อมูลไม่ได้: '+j.failed.join(', '):'');
+  $('info').textContent=info(j.params);
+  render();const t=view()[0];if(!sel&&t)openChart(t.symbol)}
+ catch(e){$('st').textContent='ผิดพลาด: '+e.message}}
+async function openChart(sym){
+ sel=sym;render();$('ct').textContent=sym+' กำลังโหลด...';
+ try{const j=await api('data/chart/'+fname(sym));
+  if(chart)chart.remove();
+  chart=LightweightCharts.createChart($('chart'),{autoSize:true,layout:{background:{color:'transparent'},textColor:getComputedStyle(document.body).color},
+   grid:{vertLines:{color:'rgba(128,128,128,.15)'},horzLines:{color:'rgba(128,128,128,.15)'}},rightPriceScale:{borderVisible:false},timeScale:{borderVisible:false}});
+  const cs=chart.addCandlestickSeries();
+  cs.setData(j.candles.map(c=>{const z=ZC[c.zone]||ZC.Neutral;return{time:c.time,open:c.open,high:c.high,low:c.low,close:c.close,color:z,wickColor:z,borderColor:z}}));
+  chart.addLineSeries({color:'#e74c3c',lineWidth:1,priceLineVisible:false,lastValueVisible:false}).setData(j.fast);
+  chart.addLineSeries({color:'#3498db',lineWidth:2,priceLineVisible:false,lastValueVisible:false}).setData(j.slow);
+  cs.setMarkers(j.marks.map(m=>m.kind==='in'
+   ?{time:m.time,position:m.side==='LONG'?'belowBar':'aboveBar',color:m.side==='LONG'?'#2ecc71':'#e74c3c',shape:m.side==='LONG'?'arrowUp':'arrowDown',text:'IN'}
+   :{time:m.time,position:m.side==='LONG'?'aboveBar':'belowBar',color:m.win?'#2ecc71':'#e74c3c',shape:'circle',text:m.text}
+  ).sort((a,b)=>a.time<b.time?-1:a.time>b.time?1:0));
+  if(j.stop!=null)cs.createPriceLine({price:j.stop,color:'#f39c12',lineWidth:1,lineStyle:2,title:'SL'});
+  if(j.entry!=null)cs.createPriceLine({price:j.entry,color:'#9aa0a6',lineWidth:1,lineStyle:2,title:'Entry'});
+  const n=j.candles.length;chart.timeScale().setVisibleLogicalRange({from:Math.max(0,n-250),to:n+5});
+  const L=j.candles[n-1],r=rows.find(x=>x.symbol===sym);
+  $('ct').innerHTML=`<b>${sym}</b> · ${fp(L.close)} · <span class="z" style="background:${ZC[L.zone]||ZC.Neutral}">${L.zone}</span> · ${L.time}`+(r?` · ${sigCell(r)} · SL ${slCell(r)}`:'');
+ }catch(e){$('ct').textContent=sym+' : '+e.message}}
+$('tb').addEventListener('click',e=>{const tr=e.target.closest('tr.r');if(tr)openChart(tr.dataset.s)});
+$('th').addEventListener('click',e=>{const th=e.target.closest('th');if(!th)return;const i=+th.dataset.i;if(sk===i)sd=-sd;else{sk=i;sd=-1}render()});
+['q','mt'].forEach(i=>$(i).oninput=render);$('fl').onchange=render;
+$('scan').onclick=scan;
+scan();
+</script></body></html>

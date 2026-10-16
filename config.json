@@ -1,0 +1,19 @@
+{
+  "symbols": ["PTT.BK", "AOT.BK", "BTC-USD", "ETH-USD", "BNB-USD", "SOL-USD", "AAPL", "TSLA", "STX", "NVDA", "GOOG"],
+  "chart_bars": 750,
+  "params": {
+    "mode": "long",
+    "fast": 12,
+    "slow": 26,
+    "smooth": 1,
+    "atr_len": 14,
+    "atr_mult": 2.0,
+    "rr": 0,
+    "trail": false,
+    "risk": 1.0,
+    "equity": 100000,
+    "years": 8,
+    "fee": 0.15,
+    "slip": 0.05
+  }
+}
